@@ -1,0 +1,1435 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Batalha dos Chefes</title>
+    <link href='https://fonts.googleapis.com/css?family=Coral+Pixels' rel='stylesheet'>
+    <link href='https://fonts.googleapis.com/css?family=Jersey 10' rel='stylesheet'>
+    <style>
+        /* Estilos do corpo e do contêiner do jogo */
+        body {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            background: linear-gradient(135deg, #1a1a1a, #000000);
+            font-family: "Comic Sans MS", cursive, sans-serif;
+            color: white;
+            text-align: center;
+            overflow: hidden;
+        }
+
+        #game-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            /* A animação de pulso agora é adicionada via JavaScript após a animação de abertura */
+        }
+
+        /* Estilos do contêiner da tela de TV para aplicar os efeitos */
+        .tv-screen {
+            position: relative;
+            border: 3px solid white;
+            border-radius: 12px;
+            box-shadow: 0 0 30px rgba(255, 255, 255, 0.4), 0 0 60px rgba(0, 0, 255, 0.2);
+            transition: box-shadow 0.5s;
+            overflow: hidden; /* Garante que os efeitos fiquem dentro das bordas */
+            animation: unfold-vertical 1.5s ease-out forwards;
+        }
+
+            /* Efeitos de varredura (scanlines) e estática (flicker) */
+            .tv-screen::before {
+                content: '';
+                position: absolute;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                background: linear-gradient(rgba(0,0,0,0.2) 50%, transparent 50%);
+                background-size: 100% 2px; /* Cria as linhas de varredura horizontais */
+                pointer-events: none;
+                animation: tv-flicker 0.2s infinite; /* Adiciona um sutil efeito de estática */
+            }
+
+            /* Efeitos de vinheta e curvatura */
+            .tv-screen::after {
+                content: '';
+                position: absolute;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                box-shadow: inset 0 0 50px rgba(0,0,0,0.5), inset 0 0 100px rgba(0,0,0,0.3), inset 0 0 150px rgba(0,0,0,0.2);
+                pointer-events: none;
+                border-radius: 12px;
+            }
+
+        /* Classe para desativar os efeitos de TV */
+        .no-tv-effect::before,
+        .no-tv-effect::after {
+            display: none;
+        }
+
+        /* O canvas agora está dentro do contêiner .tv-screen */
+        canvas {
+            display: block;
+            background: radial-gradient(circle at center, #111 0%, #000 100%);
+            /* O canvas não precisa mais de borda ou sombra, pois o contêiner .tv-screen já as possui */
+            width: 100%;
+            height: 100%;
+        }
+
+        #info {
+            margin-bottom: 15px;
+            text-shadow: 0 0 5px #00f, 0 0 10px #0ff;
+            animation: flicker 3s infinite;
+        }
+
+        /* Keyframes para a animação de abertura vertical */
+        @keyframes unfold-vertical {
+            0% {
+                transform: scaleY(0);
+                opacity: 0;
+            }
+
+            100% {
+                transform: scaleY(1);
+                opacity: 1;
+            }
+        }
+
+        /* Keyframes para o efeito de estática da tela */
+        @keyframes tv-flicker {
+            0%, 100% {
+                opacity: 1;
+            }
+
+            50% {
+                opacity: 0.9;
+            }
+        }
+
+        /* Keyframes para a animação de pulso (será aplicada após a abertura) */
+        @keyframes pulse-glow {
+            from {
+                filter: drop-shadow(0 0 5px #4a90e2);
+            }
+
+            to {
+                filter: drop-shadow(0 0 20px #4a90e2);
+            }
+        }
+
+        @keyframes flicker {
+            0%, 19%, 21%, 23%, 25%, 54%, 56%, 100% {
+                opacity: 1;
+            }
+
+            20%, 24%, 55% {
+                opacity: 0.4;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div id="game-container">
+        <div id="info">
+            <h2>Batalha dos Chefes</h2>
+            <p>Use as Setas para mover, 'X' para pular e 'Z' para atirar.</p>
+            <p>Pressione 'Q' para ligar/desligar o efeito de TV!</p>
+        </div>
+        <!-- Novo contêiner para os efeitos de TV -->
+        <div class="tv-screen">
+            <canvas id="gameCanvas" width="800" height="600"></canvas>
+        </div>
+    </div>
+
+    <script>
+        // ==============================
+        // SETUP INICIAL DO JOGO
+        // ==============================
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        let score = 0;
+
+        // Adiciona um listener para o evento de pressionar uma tecla
+        document.addEventListener('keydown', (event) => {
+            // Verifica se a tecla pressionada é 'q' ou 'Q'
+            if (event.key === 'q' || event.key === 'Q') {
+                // Encontra a div com a classe 'tv-screen'
+                const tvScreen = document.querySelector('.tv-screen');
+                // Alterna a classe 'no-tv-effect' para ligar/desligar os efeitos
+                tvScreen.classList.toggle('no-tv-effect');
+            }
+        });
+
+
+
+        let currentBoss = 1; // 1 para Máfia da Raiz, 2 para Il Melecone
+        let gameOver = false;
+        let parallaxOffset = 0;
+        let gameWon = false;
+        let lastHitTime = 0;
+        const invincibilityDuration = 1000; // 1 segundo de invencibilidade
+
+        const gravity = 0.5;
+        const groundY = canvas.height - 50;
+
+        document.addEventListener('DOMContentLoaded', () => {
+            const canvas = document.getElementById('gameCanvas');
+            const gameContainer = document.getElementById('game-container');
+
+            // Define a duração da animação de abertura (deve corresponder ao CSS)
+            const animationDuration = 1000; // 1.5 segundos
+
+            // Adiciona um listener para quando a animação de abertura terminar
+            setTimeout(() => {
+                console.log('Animação de abertura concluída. O jogo pode começar.');
+
+                // Adiciona a animação de pulso e brilho ao container após a abertura
+                gameContainer.style.animation = 'pulse-glow 4s infinite alternate';
+
+                // *** Coloque a lógica principal do seu jogo aqui! ***
+                // Exemplo:
+                // startGame();
+            }, animationDuration);
+        });
+
+        // Screen Shake variables
+        let screenShakeMagnitude = 0;
+        let screenShakeDuration = 0;
+        let screenShakeTimer = 0;
+
+        // Function to initiate screen shake
+        function startScreenShake(magnitude, duration) {
+            screenShakeMagnitude = magnitude;
+            screenShakeDuration = duration;
+            screenShakeTimer = duration;
+        }
+
+        // ==============================
+        // PARTICLE SYSTEM
+        // ==============================
+        const particles = [];
+
+        function createParticle(x, y, color, size, speedX, speedY, decay, shape = 'rect') {
+            particles.push({
+                x, y, color, size, speedX, speedY, decay, shape,
+                life: 100 // initial life percentage
+            });
+        }
+
+        function updateParticles() {
+            for (let i = particles.length - 1; i >= 0; i--) {
+                const p = particles[i];
+                p.x += p.speedX;
+                p.y += p.speedY;
+                p.life -= p.decay;
+
+                if (p.life <= 0) {
+                    particles.splice(i, 1);
+                }
+            }
+        }
+
+        function drawParticles() {
+            for (const p of particles) {
+                ctx.save();
+                ctx.globalAlpha = p.life / 100;
+                ctx.fillStyle = p.color;
+                if (p.shape === 'circle') {
+                    ctx.beginPath();
+                    ctx.arc(p.x, p.y, p.size / 2, 0, Math.PI * 2);
+                    ctx.fill();
+                } else {
+                    ctx.fillRect(p.x, p.y, p.size, p.size);
+                }
+                ctx.restore();
+            }
+        }
+
+        // ==============================
+        // CORAÇÕES
+        // ==============================
+        function drawHeart(ctx, x, y, size) {
+            ctx.beginPath();
+
+            // Ponto inicial (a ponta de baixo do coração)
+            const startX = x;
+            const startY = y + size;
+            ctx.moveTo(startX, startY);
+
+            // Curva da esquerda
+            ctx.bezierCurveTo(
+                x, y + size * 0.7,   // Ponto de controle 1
+                x - size / 2, y,     // Ponto de controle 2
+                x - size / 2, y      // Ponto final da curva
+            );
+
+            // Curva de cima para o meio (arco da esquerda)
+            ctx.arc(
+                x - size / 4, y,     // Centro do arco
+                size / 4,            // Raio
+                Math.PI, 0,          // Ângulos (de 180 a 0 graus)
+                false
+            );
+
+            // Curva de cima para o meio (arco da direita)
+            ctx.arc(
+                x + size / 4, y,     // Centro do arco
+                size / 4,            // Raio
+                Math.PI, 0,          // Ângulos
+                false
+            );
+
+            // Curva da direita
+            ctx.bezierCurveTo(
+                x + size / 2, y,     // Ponto de controle 1
+                x, y + size * 0.7,   // Ponto de controle 2
+                x, y + size          // Ponto final (volta ao início)
+            );
+
+            ctx.closePath();
+            ctx.fill(); // Preenche o coração com a cor definida em fillStyle
+            ctx.fillStyle = 'white';
+            ctx.font = '20px Arial';
+            ctx.fillText('Score: ' + score, canvas.width - 140, 30);
+        }
+
+        
+
+
+        // ==============================
+        // JOGADOR (MAGO)
+        // ==============================
+        const player = {
+            x: 100,
+            y: groundY - 60,
+            width: 40,
+            height: 60,
+            color: '#4a90e2', // Azul Mago
+            speed: 5,
+            direction: 'right',
+            velocityY: 0,
+            isJumping: false,
+            health: 3,
+            maxHealth: 3,
+            isInvincible: false,
+        
+
+            staffAnimation: {
+                startTime: 0,
+                duration: 500, // milissegundos
+                active: false,
+                direction: 'right'
+            },
+
+            draw() {
+                // Efeito de invencibilidade (piscar)
+                if (this.isInvincible) {
+                    ctx.globalAlpha = (Math.floor(Date.now() / 100) % 2 === 0) ? 0.5 : 1.0;
+                }
+
+
+
+                // === Corpo com sombreamento ===
+                let bodyTop = this.y + 30;
+                let bodyHeight = this.height - 30;
+
+                let bodyGradient = ctx.createLinearGradient(
+                    this.x, bodyTop, this.x, bodyTop + bodyHeight
+                );
+                bodyGradient.addColorStop(0, '#3399ff'); // topo iluminado
+                bodyGradient.addColorStop(1, '#003366'); // base escura
+
+                ctx.fillStyle = bodyGradient;
+                ctx.fillRect(this.x, bodyTop, this.width, bodyHeight);
+
+                // Estrelas no manto
+                ctx.fillStyle = 'yellow';
+                for (let i = 0; i < 5; i++) {
+                    let starX = this.x + 10 + Math.random() * (this.width - 20);
+                    let starY = this.y + 35 + Math.random() * (this.height - 40);
+                    ctx.beginPath();
+                    ctx.arc(starX, starY, 3, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+
+                // === Cabeça com sombreamento ===
+                let headX = this.x + this.width / 2;
+                let headY = this.y + 20;
+                let headRadius = 15;
+
+                let gradient = ctx.createRadialGradient(
+                    headX - 5, headY - 5, 5, // ponto de luz
+                    headX, headY, headRadius // centro da cabeça
+                );
+                gradient.addColorStop(0, '#f1c27d'); // cor clara
+                gradient.addColorStop(1, '#a67c52'); // sombra escura
+
+                ctx.fillStyle = gradient;
+                ctx.beginPath();
+                ctx.arc(headX, headY, headRadius, 0, Math.PI * 2);
+                ctx.fill();
+
+                // Barba
+                ctx.fillStyle = 'white';
+                ctx.beginPath();
+                ctx.moveTo(this.x + this.width / 2 - 10, this.y + 25);
+                ctx.lineTo(this.x + this.width / 2 + 10, this.y + 25);
+                ctx.lineTo(this.x + this.width / 2, this.y + 50);
+                ctx.closePath();
+                ctx.fill();
+
+                // Olhos
+                ctx.fillStyle = 'black';
+                ctx.beginPath();
+                ctx.arc(this.x + this.width / 2 - 5, this.y + 17, 2, 0, Math.PI * 2);
+                ctx.arc(this.x + this.width / 2 + 5, this.y + 17, 2, 0, Math.PI * 2);
+                ctx.fill();
+
+                // === Chapéu com sombreamento ===
+                let hatTopY = this.y - 20;
+                let hatBottomY = this.y + 10;
+
+                let hatGradient = ctx.createLinearGradient(
+                    this.x, hatTopY, this.x, hatBottomY
+                );
+                hatGradient.addColorStop(0, '#3366cc'); // topo mais claro
+                hatGradient.addColorStop(1, '#001a4d'); // base mais escura
+
+                ctx.fillStyle = hatGradient;
+                ctx.beginPath();
+                ctx.moveTo(this.x + this.width / 2, hatTopY);
+                ctx.lineTo(this.x + this.width / 2 - 30, hatBottomY);
+                ctx.lineTo(this.x + this.width / 2 + 30, hatBottomY);
+                ctx.closePath();
+                ctx.fill();
+
+                // === Aba do chapéu com sombreamento ===
+                let brimGradient = ctx.createLinearGradient(
+                    this.x, this.y + 2, this.x, this.y + 18
+                );
+                brimGradient.addColorStop(0, '#1c3871'); // topo da aba
+                brimGradient.addColorStop(1, '#001a4d'); // parte inferior da aba
+
+                ctx.fillStyle = brimGradient;
+                ctx.beginPath();
+                ctx.ellipse(this.x + this.width / 2, this.y + 10, 35, 8, 0, 0, Math.PI * 2);
+                ctx.fill();
+
+                // === Cajado com animação ===
+                const staffX = this.x;
+                const staffY = this.y + 70; // base do cajado (ponto de rotação)
+
+                // Cálculo da animação
+                let rotation = 0;
+                let offsetX = 0;
+
+                if (this.staffAnimation.active) {
+                    const now = Date.now();
+                    const elapsed = now - this.staffAnimation.startTime;
+                    const t = elapsed / this.staffAnimation.duration;
+
+                    // Easing para ida e volta (0 -> 1 -> 0)
+                    const progress = Math.sin(t * Math.PI); // suave ida e volta
+
+                    // Aponta o orbe na direção
+                    const angle = (this.staffAnimation.direction === 'left' ? -1 : 1) * 0.5; // em radianos
+                    rotation = angle * progress;
+
+                    // Deslocamento para frente/atrás
+                    offsetX = 10 * progress * (this.staffAnimation.direction === 'right' ? 3 : -0.5);
+
+                    // Finaliza animação
+                    if (elapsed > this.staffAnimation.duration) {
+                        this.staffAnimation.active = false;
+                    }
+                }
+
+                // Salva o contexto para rotacionar o cajado
+                ctx.save();
+                ctx.translate(staffX + offsetX, staffY); // Ponto de rotação
+                ctx.rotate(rotation);
+
+                // Cabo
+                ctx.fillStyle = '#8B4513';
+                ctx.fillRect(-10, -40, 5, 40); // reposiciona relativo à base
+
+                // Orbe
+                ctx.fillStyle = 'gold';
+                ctx.beginPath();
+                ctx.arc(-7.5, -40, 5, 0, Math.PI * 2);
+                ctx.fill();
+
+                ctx.restore();
+
+                // Restaura opacidade
+                ctx.globalAlpha = 1.0;
+
+                // Defina um tamanho padrão para os corações para facilitar o ajuste
+                const heartSize = 25;
+                const heartSpacing = 35; // Espaçamento entre os corações
+                const startX = 25;
+                const startY = 20;
+
+
+                // // Corações - Agora com formas!
+                for (let i = 0; i < this.maxHealth; i++) {
+                    const currentX = startX + i * heartSpacing;
+
+                    if (i < this.health) {
+                        // Cria um degradê horizontal para o coração
+                        const gradient = ctx.createLinearGradient(currentX - heartSize, 0, currentX + heartSize, 0);
+                        gradient.addColorStop(0, '#8B0000'); // vermelho escuro à esquerda
+                        gradient.addColorStop(1, '#FF4D4D'); // vermelho claro à direita
+
+                        ctx.fillStyle = gradient;
+                    } else {
+                        const gradient = ctx.createLinearGradient(currentX - heartSize, 0, currentX + heartSize, 0);
+                        gradient.addColorStop(0, '#222222'); // vermelho escuro à esquerda
+                        gradient.addColorStop(1, '#666666'); // vermelho claro à direita
+
+                        ctx.fillStyle = gradient;
+                    }
+
+                    drawHeart(ctx, currentX, startY, heartSize);
+                }
+
+
+                // Cole esta função em algum lugar do seu código onde o loop possa acessá-la
+                function drawHeart(ctx, x, y, size) {
+                    ctx.beginPath();
+
+                    const topCurveHeight = size * 0.3;
+                    const middleWidth = size * 0.7;
+                    const tipWidth = size * 0.2;
+                    const tipHeight = size * 0.7;
+
+                    ctx.moveTo(x, y + tipHeight);
+
+                    // Curva inferior esquerda
+                    ctx.bezierCurveTo(x, y + tipHeight + tipWidth, x - middleWidth, y + topCurveHeight, x - middleWidth, y);
+
+                    // Arco superior esquerdo
+                    ctx.arc(x - middleWidth / 2, y, middleWidth / 2, Math.PI, 0, false);
+
+                    // Arco superior direito
+                    ctx.arc(x + middleWidth / 2, y, middleWidth / 2, Math.PI, 0, false);
+
+                    // Curva inferior direita
+                    ctx.bezierCurveTo(x + middleWidth, y + topCurveHeight, x, y + tipHeight + tipWidth, x, y + tipHeight);
+
+                    ctx.closePath();
+                    ctx.fill();
+
+                    // Adiciona uma borda
+                    ctx.strokeStyle = '#000000'; // Cor da borda
+                    ctx.lineWidth = 1;        // Espessura da borda
+                    ctx.stroke();             // Desenha a borda
+                }
+            },
+            update() {
+
+
+                // Movimento horizontal
+                if (keys.ArrowLeft && this.x > 0) {
+                    this.x -= this.speed;
+                    this.direction = 'left'; // Atualiza para esquerda
+                }
+                if (keys.ArrowRight && this.x < canvas.width - this.width) {
+                    this.x += this.speed;
+                    this.direction = 'right'; // Atualiza para esquerda
+                }
+
+                
+
+                // Pulo e gravidade
+                this.y += this.velocityY;
+                if (this.y + this.height < groundY) {
+                    this.velocityY += gravity;
+                    this.isJumping = true;
+                } else {
+                    this.velocityY = 0;
+                    this.isJumping = false;
+                    this.y = groundY - this.height;
+                }
+
+                // Checa invencibilidade
+                if (this.isInvincible && Date.now() > lastHitTime + invincibilityDuration) {
+                    this.isInvincible = false;
+                }
+
+                this.draw();
+            },
+            jump() {
+                if (!this.isJumping) {
+                    this.velocityY = -13;
+                    this.isJumping = true;
+                    for (let i = 0; i < 10; i++) {
+                        createParticle(player.x + player.width / 2, player.y + player.height, '#fff', 3, (Math.random() - 0.5) * 3, Math.random() * 2 - 5, 2);
+                    }
+                }
+            },
+            takeDamage() {
+                if (!this.isInvincible) {
+                    this.health--;
+                    this.isInvincible = true;
+                    lastHitTime = Date.now();
+                    startScreenShake(5, 200); // Small shake on player hit
+                    for (let i = 0; i < 20; i++) {
+                        createParticle(player.x + player.width / 2, player.y + player.height / 2, 'red', 5, (Math.random() - 0.5) * 7, (Math.random() - 0.5) * 7, 3);
+                    }
+                    if (this.health <= 0) {
+                        setTimeout(() => {
+                            gameOver = true;
+                        }, 100);
+                    }
+                }
+            }
+        };
+
+        // ==============================
+        // CONTROLES
+        // ==============================
+        const keys = {
+            ArrowLeft: false,
+            ArrowRight: false,
+            z: false
+        };
+
+        let shootInterval;
+        const shootCooldown = 200; // 0.2 segundos em milissegundos
+
+        window.addEventListener('keydown', (e) => {
+            switch (e.key.toLowerCase()) {
+                case 'arrowleft': keys.ArrowLeft = true; break;
+                case 'arrowright': keys.ArrowRight = true; break;
+                case 'x': player.jump(); break;
+                case 'z':
+                    if (!keys.z) { // Evita múltiplos intervalos
+                        keys.z = true;
+                        fire(); // Atira imediatamente
+                        if (shootInterval) clearInterval(shootInterval);
+                        shootInterval = setInterval(fire, shootCooldown);
+                    }
+                    break;
+            }
+        });
+
+        window.addEventListener('keyup', (e) => {
+            switch (e.key.toLowerCase()) {
+                case 'arrowleft': keys.ArrowLeft = false; break;
+                case 'arrowright': keys.ArrowRight = false; break;
+                case 'z':
+                    keys.z = false;
+                    clearInterval(shootInterval);
+                    break;
+            }
+        });
+
+        
+
+        // ==============================
+        // SISTEMA DE TIROS
+        // ==============================
+        const bullets = [];
+        function fire() {
+            const direction = player.direction === 'left' ? -1 : 1;
+            bullets.push({
+                x: direction === 1 ? player.x + player.width : player.x - 15,
+                y: player.y + player.height / 2 - 2.5,
+                width: 15,
+                height: 5,
+                color: '#f1c40f',
+                speed: 10 * direction,
+                trailParticles: [] // Store trail particles for this bullet
+            });
+            for (let i = 0; i < 5; i++) {
+                createParticle(player.x + player.width / 2, player.y + player.height / 2, '#f1c40f', 2, (Math.random() - 0.5) * 4 + direction * 2, (Math.random() - 0.5) * 4, 5);
+            }
+            // Inicia animação do cajado
+            player.staffAnimation.startTime = Date.now();
+            player.staffAnimation.active = true;
+            player.staffAnimation.direction = player.direction;
+        }
+
+        function handleBullets() {
+            for (let i = bullets.length - 1; i >= 0; i--) {
+                const b = bullets[i];
+                b.x += b.speed;
+                ctx.fillStyle = b.color;
+                ctx.fillRect(b.x, b.y, b.width, b.height);
+
+                // Bullet trail
+                createParticle(b.x + b.width / 2, b.y + b.height / 2, b.color, 2, -b.speed * 0.1, 0, 10, 'circle');
+
+
+                if (b.x > canvas.width || b.x < -b.width) {
+                    bullets.splice(i, 1);
+                }
+            }
+        }
+
+        // ==============================
+        // CHEFE 1: MÁFIA DA RAIZ
+        // ==============================
+        const mafiaDaRaiz = {
+            hp: 450,
+            maxHp: 450,
+            projectiles: [],
+            homingProjectiles: [],
+            attackCooldown: 1000,
+            lastAttack: 0,
+            hitFlash: 0, // For visual feedback on hit
+            getHitbox() {
+                if (this.hp > 300) return { x: canvas.width - 100, y: groundY - 80, width: 80, height: 80 };
+                if (this.hp > 150) return { x: canvas.width / 2 - 40, y: groundY - 100, width: 80, height: 100 };
+                return { x: canvas.width / 2 - 25, y: groundY - 120, width: 50, height: 120 };
+            },
+            draw() {
+                const hitbox = this.getHitbox();
+
+
+
+                // Apply hit flash effect
+                if (this.hitFlash > 0) {
+                    ctx.fillStyle = 'rgba(255, 255, 255, 1)';
+                    ctx.fillRect(hitbox.x, hitbox.y, hitbox.width, hitbox.height);
+                    this.hitFlash--;
+                } else {
+                    // Fase 1: Batata
+                    if (this.hp > 300) {
+                        ctx.fillStyle = '#a5682a';
+                        ctx.fillRect(hitbox.x, hitbox.y, hitbox.width, hitbox.height);
+                        // Batata face
+                        ctx.fillStyle = 'black';
+                        ctx.beginPath();
+                        ctx.arc(hitbox.x + hitbox.width * 0.3, hitbox.y + hitbox.height * 0.4, 4, 0, Math.PI * 2); // Eye 1
+                        ctx.arc(hitbox.x + hitbox.width * 0.7, hitbox.y + hitbox.height * 0.4, 4, 0, Math.PI * 2); // Eye 2
+                        ctx.fill();
+                        ctx.fillRect(hitbox.x + hitbox.width * 0.4, hitbox.y + hitbox.height * 0.6, hitbox.width * 0.2, 3); // Mouth
+                    }
+                    // Fase 2: Cebola
+                    if (this.hp <= 300 && this.hp > 150) {
+                        ctx.fillStyle = '#d1c29a';
+                        ctx.fillRect(hitbox.x, hitbox.y, hitbox.width, hitbox.height);
+                        // Cebola face (sad/crying)
+                        ctx.fillStyle = 'blue';
+                        ctx.beginPath();
+                        ctx.arc(hitbox.x + hitbox.width * 0.3, hitbox.y + hitbox.height * 0.4, 5, 0, Math.PI * 2); // Eye 1
+                        ctx.arc(hitbox.x + hitbox.width * 0.7, hitbox.y + hitbox.height * 0.4, 5, 0, Math.PI * 2); // Eye 2
+                        ctx.fill();
+                        ctx.strokeStyle = 'blue';
+                        ctx.lineWidth = 2;
+                        ctx.beginPath();
+                        ctx.arc(hitbox.x + hitbox.width * 0.5, hitbox.y + hitbox.height * 0.65, 8, 0, Math.PI, true); // Sad mouth
+                        ctx.stroke();
+                    }
+                    // Fase 3: Cenoura (desenhada por cima da cebola)
+                    if (this.hp <= 150) {
+                        ctx.fillStyle = '#ff8c00';
+                        ctx.globalAlpha = 1.0; // Fica no "fundo"
+                        ctx.fillRect(hitbox.x, hitbox.y, hitbox.width, hitbox.height);
+                        ctx.globalAlpha = 1.0;
+                        // Cenoura face (angry)
+                        ctx.fillStyle = 'black';
+                        ctx.fillRect(hitbox.x + hitbox.width * 0.2, hitbox.y + hitbox.height * 0.3, 5, 5); // Eye 1
+                        ctx.fillRect(hitbox.x + hitbox.width * 0.6, hitbox.y + hitbox.height * 0.3, 5, 5); // Eye 2
+                        ctx.strokeStyle = 'black';
+                        ctx.lineWidth = 2;
+                        ctx.beginPath();
+                        ctx.moveTo(hitbox.x + hitbox.width * 0.3, hitbox.y + hitbox.height * 0.6);
+                        ctx.lineTo(hitbox.x + hitbox.width * 0.7, hitbox.y + hitbox.height * 0.6);
+                        ctx.stroke(); // Straight line mouth
+                    }
+                }
+            },
+            update(time) {
+                if (time > this.lastAttack + this.attackCooldown) {
+                    this.lastAttack = time;
+                    // Fase 1: Batata
+                    if (this.hp > 300) {
+                        this.attackCooldown = 2000;
+                        this.projectiles.push({
+                            type: 'dirt',
+                            x: canvas.width - 100,
+                            y: groundY - 40,
+                            width: 30,
+                            height: 30,
+                            speed: -4,
+                            color: '#654321'
+                        });
+                    }
+                    // Fase 2: Cebola
+                    else if (this.hp > 150) {
+                        this.attackCooldown = 800;
+                        for (let i = 0; i < 3; i++) {
+                            this.projectiles.push({
+                                type: 'tear',
+                                x: Math.random() * canvas.width,
+                                y: -20,
+                                width: 10,
+                                height: 20,
+                                speed: 5 + Math.random() * 2,
+                                color: '#add8e6'
+                            });
+                        }
+                    }
+                    // Fase 3: Cenoura
+                    else {
+                        this.attackCooldown = 7000;
+                        this.homingProjectiles.push({
+                            x: Math.random() * canvas.width,
+                            y: -20,
+                            width: 20,
+                            height: 20,
+                            speed: 2.5,
+                            hp: 3,
+                            color: '#ff4500'
+                        });
+                    }
+                }
+                this.handleProjectiles();
+                this.draw();
+            },
+            handleProjectiles() {
+                // Projéteis normais (Batata / Cebola)
+                for (let i = this.projectiles.length - 1; i >= 0; i--) {
+                    const p = this.projectiles[i];
+                    if (p.type === 'dirt') p.x += p.speed;
+                    else p.y += p.speed;
+
+                    ctx.fillStyle = p.color;
+                    ctx.fillRect(p.x, p.y, p.width, p.height);
+
+                    if (checkCollision(player, p)) {
+                        player.takeDamage();
+                        for (let j = 0; j < 15; j++) {
+                            createParticle(p.x + p.width / 2, p.y + p.height / 2, p.color, 4, (Math.random() - 0.5) * 5, (Math.random() - 0.5) * 5, 4);
+                        }
+                        this.projectiles.splice(i, 1);
+                    } else if (p.x < -p.width || p.y > canvas.height) {
+                        this.projectiles.splice(i, 1);
+                    }
+                }
+
+                // Projéteis teleguiados (Cenoura)
+                for (let i = this.homingProjectiles.length - 1; i >= 0; i--) {
+                    const hp = this.homingProjectiles[i];
+                    const angle = Math.atan2((player.y + player.height / 2) - (hp.y + hp.height / 2), (player.x + player.width / 2) - (hp.x + hp.width / 2));
+                    hp.x += Math.cos(angle) * hp.speed;
+                    hp.y += Math.sin(angle) * hp.speed;
+
+                    ctx.fillStyle = hp.color;
+                    ctx.fillRect(hp.x, hp.y, hp.width, hp.height);
+
+                    if (checkCollision(player, hp)) {
+                        player.takeDamage();
+                        for (let j = 0; j < 15; j++) {
+                            createParticle(hp.x + hp.width / 2, hp.y + hp.height / 2, hp.color, 4, (Math.random() - 0.5) * 5, (Math.random() - 0.5) * 5, 4);
+                        }
+                        this.homingProjectiles.splice(i, 1);
+                        continue;
+                    }
+
+                    for (let j = bullets.length - 1; j >= 0; j--) {
+                        if (checkCollision(bullets[j], hp)) {
+                            hp.hp--;
+                            for (let k = 0; k < 5; k++) {
+                                createParticle(bullets[j].x, bullets[j].y, bullets[j].color, 2, (Math.random() - 0.5) * 3, (Math.random() - 0.5) * 3, 5);
+                            }
+                            bullets.splice(j, 1);
+                            if (hp.hp <= 0) {
+                                for (let k = 0; k < 20; k++) {
+                                    createParticle(hp.x + hp.width / 2, hp.y + hp.height / 2, hp.color, 5, (Math.random() - 0.5) * 7, (Math.random() - 0.5) * 7, 3);
+                                }
+                                this.homingProjectiles.splice(i, 1);
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        };
+
+        // ==============================
+        // CHEFE 2: IL MELECONE
+        // ==============================
+        const ilMelecone = {
+            hp: 450,
+            maxHp: 450,
+            x: canvas.width / 2,
+            y: groundY - 50,
+            width: 50,
+            height: 50,
+            color: '#4169e1',
+            velocityY: 0,
+            speedX: 3,
+            phase: 1,
+            attackState: 'jumping', // jumping, landing_pause, preparing_punch, punching, tomb_follow, tomb_pause, tomb_slam
+            stateTimer: 0,
+            punchHitbox: { x: 0, y: 0, width: 0, height: 0 },
+            hitFlash: 0, // For visual feedback on hit
+
+            draw() {
+                // Apply hit flash effect
+                if (this.hitFlash > 0) {
+                    ctx.fillStyle = 'rgba(255, 255, 255, 1)';
+                    ctx.fillRect(this.x, this.y, this.width, this.height);
+                    this.hitFlash--;
+                } else {
+                    ctx.fillStyle = this.color;
+                    ctx.fillRect(this.x, this.y, this.width, this.height);
+                }
+
+                if (ilMelecone.visible !== false) {
+                    ctx.fillRect(ilMelecone.x, ilMelecone.y, ilMelecone.width, ilMelecone.height);
+                }
+
+                // Draw Il Melecone face based on phase
+                ctx.fillStyle = 'white';
+                if (this.phase === 1) { // Normal
+                    ctx.beginPath();
+                    ctx.arc(this.x + this.width * 0.35, this.y + this.height * 0.4, 3, 0, Math.PI * 2); // Left eye
+                    ctx.arc(this.x + this.width * 0.65, this.y + this.height * 0.4, 3, 0, Math.PI * 2); // Right eye
+                    ctx.fill();
+                    ctx.beginPath();
+                    ctx.arc(this.x + this.width * 0.5, this.y + this.height * 0.6, 6, 0, Math.PI); // Smile
+                    ctx.stroke();
+                } else if (this.phase === 2) { // Angry
+                    ctx.beginPath();
+                    ctx.arc(this.x + this.width * 0.4, this.y + this.height * 0.4, 7, 0, Math.PI * 2); // Left eye
+                    ctx.arc(this.x + this.width * 0.6, this.y + this.height * 0.4, 7, 0, Math.PI * 2); // Right eye
+                    ctx.fill();
+                    ctx.strokeStyle = 'black';
+                    ctx.lineWidth = 2;
+                    ctx.beginPath();
+                    ctx.moveTo(this.x + this.width * 0.3, this.y + this.height * 0.65);
+                    ctx.lineTo(this.x + this.width * 0.7, this.y + this.height * 0.65); // Straight mouth
+                    ctx.stroke();
+                } else if (this.phase === 3) { // Sad/Determined
+                    ctx.beginPath();
+                    ctx.arc(this.x + this.width * 0.35, this.y + this.height * 0.45, 4, 0, Math.PI * 2); // Left eye
+                    ctx.arc(this.x + this.width * 0.65, this.y + this.height * 0.45, 4, 0, Math.PI * 2); // Right eye
+                    ctx.fill();
+                    ctx.strokeStyle = 'white';
+                    ctx.lineWidth = 2;
+                    ctx.beginPath();
+                    ctx.arc(this.x + this.width * 0.5, this.y + this.height * 0.6, 6, 0, Math.PI, true); // Frown
+                    ctx.stroke();
+                }
+
+
+                if (this.attackState === 'punching') {
+                    const armX = this.x > canvas.width / 2 ? this.x - 100 : this.x + this.width;
+                    ctx.fillStyle = '#d2b48c'; // Braço
+                    ctx.fillRect(armX, this.y + this.height / 2 - 15, 100, 30);
+                    ctx.fillStyle = 'red'; // Luva
+                    this.punchHitbox = { x: armX - 20, y: this.y + this.height / 2 - 25, width: 40, height: 50 };
+                    ctx.fillRect(this.punchHitbox.x, this.punchHitbox.y, this.punchHitbox.width, this.punchHitbox.height);
+                } else {
+                    this.punchHitbox = { x: 0, y: 0, width: 0, height: 0 };
+                }
+            },
+            update(time) {
+                // Mudança de fase
+                if (this.hp <= 300 && this.phase === 1) {
+                    this.phase = 2;
+                    this.width = 150; this.height = 150;
+                    this.y = groundY - this.height;
+                    this.attackState = 'jumping';
+                    for (let i = 0; i < 50; i++) {
+                        createParticle(this.x + this.width / 2, this.y + this.height / 2, this.color, 7, (Math.random() - 0.5) * 10, (Math.random() - 0.5) * 10, 2);
+                    }
+                }
+                if (this.hp <= 150 && this.phase === 2) {
+                    this.phase = 3;
+                    this.width = 80; this.height = 120;
+                    this.color = '#808080';
+                    this.attackState = 'tomb_follow';
+                    for (let i = 0; i < 50; i++) {
+                        createParticle(this.x + this.width / 2, this.y + this.height / 2, this.color, 7, (Math.random() - 0.5) * 10, (Math.random() - 0.5) * 10, 2);
+                    }
+                }
+
+                // Lógica de estados
+                switch (this.attackState) {
+                    case 'jumping':
+                        this.y += this.velocityY;
+                        this.x += this.speedX;
+                        if (this.y + this.height < groundY) {
+                            this.velocityY += (this.phase === 2 ? gravity * 1.5 : gravity);
+                        } else {
+                            this.y = groundY - this.height;
+                            // Landing particles
+                            for (let i = 0; i < 20; i++) {
+                                createParticle(this.x + this.width / 2 + (Math.random() - 0.5) * this.width, groundY, '#555', 3, (Math.random() - 0.5) * 5, Math.random() * -5, 3);
+                            }
+                            startScreenShake(10, 150); // Moderate shake on boss landing
+
+                            if (this.phase === 1) {
+                                this.attackState = 'landing_pause';
+                                this.stateTimer = time;
+                                this.velocityY = 0; // Stop vertical movement
+                            } else {
+                                this.velocityY = (this.phase === 2 ? -13 : -25); // Resume jumping if not phase 1
+                            }
+                        }
+                        if (this.x <= 0 || this.x + this.width >= canvas.width) {
+                            this.speedX *= -1;
+                            // Wall collision particles
+                            for (let i = 0; i < 10; i++) {
+                                createParticle(this.x + (this.x <= 0 ? this.width : 0), this.y + this.height / 2, '#555', 3, (this.x <= 0 ? 1 : -1) * Math.random() * 5, (Math.random() - 0.5) * 5, 3);
+                            }
+                        }
+                        if (this.phase === 2 && Math.random() < 0.015) {
+                            this.attackState = 'preparing_punch';
+                            this.stateTimer = time;
+                        }
+                        break;
+                    case 'landing_pause':
+                        // Il Melecone stops for 1 second on the ground in phase 1
+                        if (time > this.stateTimer + 1000) { // 1 second pause
+                            this.attackState = 'jumping';
+                            this.velocityY = -12; // Initiate next jump
+                        }
+                        break;
+                    case 'preparing_punch':
+                        // Visual cue for preparing punch
+                        ctx.fillStyle = 'rgba(255, 255, 0, 0.3)';
+                        ctx.beginPath();
+                        ctx.arc(this.x + this.width / 2, this.y + this.height / 2, 80, 0, Math.PI * 2);
+                        ctx.fill();
+                        if (time > this.stateTimer + 500) {
+                            this.attackState = 'punching';
+                            this.stateTimer = time;
+                        }
+                        break;
+                    case 'punching':
+                        // Punching visual effects - could add particle bursts here
+                        if (checkCollision(player, this.punchHitbox) && !player.isInvincible) {
+                            startScreenShake(7, 100); // Small shake on punch hit
+                        }
+                        if (time > this.stateTimer + 5000) { // Soco dura 5s
+                            this.attackState = 'jumping';
+                        }
+                        break;
+                    case 'tomb_follow':
+                        this.y = groundY - this.height;
+                        const angle = Math.atan2(0, player.x - this.x);
+                        this.x += Math.cos(angle) * 2;
+                        if (Math.abs((player.x + player.width / 2) - (this.x + this.width / 2)) < 10) {
+                            this.attackState = 'tomb_pause';
+                            this.stateTimer = time;
+                        }
+                        break;
+                    case 'tomb_pause':
+                        // Visual cue for tomb slam
+                        ctx.fillStyle = 'rgba(255, 0, 0, 0.3)';
+                        ctx.fillRect(this.x, groundY - 10, this.width, 10); // Shadow beneath boss
+                        if (time > this.stateTimer + 1500) {
+                            this.attackState = 'tomb_slam';
+                            this.y -= 20; // Sobe um pouco antes de cair
+                        }
+                        break;
+                    case 'tomb_slam':
+                        this.y += 30; // Cai com força
+                        if (this.y + this.height >= groundY) {
+                            this.y = groundY - this.height;
+                            // Ground impact particles
+                            for (let i = 0; i < 50; i++) {
+                                createParticle(this.x + this.width / 2 + (Math.random() - 0.5) * this.width, groundY, '#8b4513', 4, (Math.random() - 0.5) * 10, Math.random() * -10, 3);
+                            }
+                            startScreenShake(15, 250); // Large shake on tomb slam
+                            // Player takes damage only on slam in phase 3
+                            if (this.phase === 3 && checkCollision(player, this)) {
+                                player.takeDamage();
+                            }
+                            this.attackState = 'tomb_follow';
+                        }
+                        break;
+                }
+                this.draw();
+            }
+        };
+
+        // ==============================
+        // FUNÇÕES AUXILIARES
+        // ==============================
+        function checkCollision(obj1, obj2) {
+            if (!obj1 || !obj2) return false;
+            return obj1.x < obj2.x + obj2.width &&
+                obj1.x + obj1.width > obj2.x &&
+                obj1.y < obj2.y + obj2.height &&
+                obj1.y + obj1.height > obj2.y;
+        }
+
+        const platforms = [
+            { x: 150, y: canvas.height - 150, width: 200, height: 20, color: '#654321' },
+            { x: canvas.width - 350, y: canvas.height - 200, width: 200, height: 20, color: '#654321' }
+        ];
+
+        function drawBackground() {
+            parallaxOffset += 10; // velocidade do fundo
+
+            if (currentBoss === 1) {
+                // Céu
+                var gradienteCeu = ctx.createLinearGradient(0, 0, 0, groundY);
+                gradienteCeu.addColorStop(0, '#4682B4'); // Azul mais escuro no topo
+                gradienteCeu.addColorStop(1, '#87CEEB'); // Azul claro na base (horizonte)
+
+                ctx.fillStyle = gradienteCeu;
+                ctx.fillRect(0, 0, canvas.width, groundY);
+
+
+                // Montanhas (camada de fundo - mais distante, parallax mais lento)
+                for (let i = -200; i < canvas.width + 250; i += 200) {
+                    let offsetX = (parallaxOffset * 0.1) % 200;
+                    ctx.fillStyle = '#7ab9ac';
+                    ctx.beginPath();
+                    ctx.moveTo(i - offsetX, groundY);
+                    ctx.lineTo(i + 150 - offsetX, groundY - 120);
+                    ctx.lineTo(i + 300 - offsetX, groundY);
+                    ctx.closePath();
+                    ctx.fill();
+                }
+
+                // Núvens (camada do fundo - velocidade 0.22)
+                const cloudSpacing2 = 180;
+                const cloudPatternWidth2 = 360; // largura total do padrão de nuvem (aprox)
+
+                for (let i = -cloudPatternWidth2; i < canvas.width + cloudPatternWidth2; i += cloudSpacing2) {
+                    let offsetX = (parallaxOffset * 0.22) % cloudPatternWidth2;  // módulo pelo padrão
+                    ctx.fillStyle = '#8ebad8';
+                    ctx.beginPath();
+                    ctx.arc(i - offsetX, 160, 45, 0, Math.PI * 2);      // Y aumentado de 130 para 160
+                    ctx.arc(i + 45 - offsetX, 150, 55, 0, Math.PI * 2); // Y aumentado de 120 para 150
+                    ctx.arc(i + 100 - offsetX, 160, 45, 0, Math.PI * 2); // Y aumentado de 130 para 160
+                    ctx.fill();
+                }
+
+                // Núvens (camada do meio - velocidade 0.25)
+                const cloudSpacing = 180;
+                const cloudPatternWidth = 360; // largura total do padrão de nuvem (aprox)
+
+                for (let i = -cloudPatternWidth; i < canvas.width + cloudPatternWidth; i += cloudSpacing) {
+                    let offsetX = (parallaxOffset * 0.25) % cloudPatternWidth;  // módulo pelo padrão
+                    ctx.fillStyle = '#B5D1E4';
+                    ctx.beginPath();
+                    ctx.arc(i - offsetX, 130, 45, 0, Math.PI * 2);
+                    ctx.arc(i + 45 - offsetX, 120, 55, 0, Math.PI * 2);
+                    ctx.arc(i + 100 - offsetX, 130, 45, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+
+                // Núvens (camada da frente - mais rápida, 0.3)
+                for (let i = -200; i < canvas.width + 300; i += 150) {
+                    let offsetX = (parallaxOffset * 0.3) % 300;
+                    ctx.fillStyle = 'white';
+                    ctx.beginPath();
+                    ctx.arc(i - offsetX, 100, 50, 0, Math.PI * 2);
+                    ctx.arc(i + 50 - offsetX, 90, 60, 0, Math.PI * 2);
+                    ctx.arc(i + 110 - offsetX, 100, 50, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+
+                // Montanhas (camada de frente - já existente)
+                for (let i = 0; i < canvas.width + 200; i += 200) {
+                    let offsetX = (parallaxOffset * 0.2) % 200;
+                    ctx.fillStyle = '#6ca36c';
+                    ctx.beginPath();
+                    ctx.moveTo(i - offsetX, groundY);
+                    ctx.lineTo(i + 100 - offsetX, groundY - 100);
+                    ctx.lineTo(i + 200 - offsetX, groundY);
+                    ctx.closePath();
+                    ctx.fill();
+                }
+
+                // === Grama com gradiente linear (camada 2) ===
+                let grassGradient = ctx.createLinearGradient(0, groundY, 0, canvas.height);
+                grassGradient.addColorStop(0, '#2e8b57'); // Verde mais vivo no topo
+                grassGradient.addColorStop(1, '#006400'); // Verde escuro na base
+                ctx.fillStyle = grassGradient;
+                ctx.fillRect(0, groundY, canvas.width, canvas.height - groundY);
+
+                // === Tronco da árvore com gradiente linear ===
+                let trunkX = canvas.width - 200;
+                let trunkY = groundY - 150;
+                let trunkHeight = 150;
+
+                let trunkGradient = ctx.createLinearGradient(0, trunkY, 0, trunkY + trunkHeight);
+                trunkGradient.addColorStop(0, '#a0522d'); // Marrom claro no topo
+                trunkGradient.addColorStop(1, '#5c3317'); // Marrom escuro na base
+                ctx.fillStyle = trunkGradient;
+                ctx.fillRect(trunkX, trunkY, 40, trunkHeight);
+
+                // === Copa da árvore com gradiente radial ===
+                let crownCenterX = canvas.width - 180;
+                let crownCenterY = groundY - 150;
+                let crownRadius = 80;
+
+                let crownGradient = ctx.createRadialGradient(
+                    crownCenterX + 10, crownCenterY - 20, 20,  // centro claro
+                    crownCenterX, crownCenterY, crownRadius // bordas escuras
+                );
+                crownGradient.addColorStop(0, '#009a00'); // Verde-limão claro
+                crownGradient.addColorStop(1, '#006400'); // Verde escuro
+                ctx.fillStyle = crownGradient;
+                ctx.beginPath();
+                ctx.arc(crownCenterX, crownCenterY, crownRadius, 0, Math.PI * 2);
+                ctx.fill();
+
+            } else {
+                // Céu da floresta escura
+                let skyGradient = ctx.createLinearGradient(0, 0, 0, groundY);
+                skyGradient.addColorStop(0, '#0a0a0a'); // topo - preto profundo
+                skyGradient.addColorStop(1, '#151515'); // próximo do chão - cinza escuro
+
+                ctx.fillStyle = skyGradient;
+                ctx.fillRect(0, 0, canvas.width, groundY);
+
+                // Camada de árvores distantes (parallax leve)
+                for (let i = 0; i < canvas.width + 100; i += 60) {
+                    let offsetX = (parallaxOffset * 0.1) % 60;
+                    ctx.fillStyle = '#1a1a1a';
+                    ctx.fillRect(i - offsetX, groundY - 120, 20, 120); // tronco
+                    ctx.fillStyle = '#013220';
+                    ctx.beginPath();
+                    ctx.arc(i + 10 - offsetX, groundY - 130, 30, 0, Math.PI * 2); // copa
+                    ctx.fill();
+                }
+
+                // Camada de árvores mais próximas (parallax médio)
+                for (let i = 0; i < canvas.width + 150; i += 100) {
+                    let offsetX = (parallaxOffset * 0.3) % 100;
+                    ctx.fillStyle = '#262626';
+                    ctx.fillRect(i - offsetX, groundY - 180, 30, 180);
+                    ctx.fillStyle = '#014421';
+                    ctx.beginPath();
+                    ctx.arc(i + 15 - offsetX, groundY - 190, 45, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+
+                // Chão da floresta
+                ctx.fillStyle = '#0b3d0b'; // verde escuro fechado
+                ctx.fillRect(0, groundY, canvas.width, canvas.height - groundY);
+
+                // Plataformas (mantém igual)
+                ctx.fillStyle = platforms[0].color;
+                for (const platform of platforms) {
+                    ctx.fillRect(platform.x, platform.y, platform.width, platform.height);
+                }
+            }
+        }
+
+        function drawBossHealthBar(boss) {
+            const barX = canvas.width / 4;
+            const barY = 60;
+            const barWidth = canvas.width / 2;
+            const barHeight = 20;
+            const borderSize = 4;
+            const hpPercentage = Math.max(0, boss.hp / boss.maxHp);
+
+            // Fundo da barra
+            ctx.fillStyle = '#222';
+            ctx.fillRect(barX - borderSize, barY - borderSize, barWidth + borderSize * 2, barHeight + borderSize * 2);
+
+            // Barra vermelha de fundo
+            ctx.fillStyle = 'darkred';
+            ctx.fillRect(barX, barY, barWidth, barHeight);
+
+            // Barra de vida atual
+            const gradient = ctx.createLinearGradient(barX, barY, barX + barWidth, barY);
+            gradient.addColorStop(0, 'lime');
+            gradient.addColorStop(1, 'yellowgreen');
+            ctx.fillStyle = gradient;
+            ctx.fillRect(barX, barY, barWidth * hpPercentage, barHeight);
+
+            // Contorno da barra
+            ctx.strokeStyle = 'white';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(barX, barY, barWidth, barHeight);
+
+            // Configurações do texto
+            ctx.font = '32px "Jersey 10", Arial, sans-serif';
+            ctx.textAlign = 'center';
+
+            // Contorno do texto (cor preta, por exemplo)
+            ctx.strokeStyle = 'black';
+            ctx.lineWidth = 4;
+            ctx.strokeText(`Boss HP: ${Math.floor(boss.hp)} / ${boss.maxHp}`, barX + barWidth / 2, barY - 10);
+
+            // Texto preenchido (cor branca)
+            ctx.fillStyle = 'white';
+            ctx.fillText(`Boss HP: ${Math.floor(boss.hp)} / ${boss.maxHp}`, barX + barWidth / 2, barY - 10);
+
+
+            // Efeito de brilho nas bordas
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(barX, barY);
+            ctx.lineTo(barX + barWidth, barY);
+            ctx.stroke();
+        } 
+
+        function showMessage(text) {
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = 'white';
+            ctx.font = '100px "Jersey 10", Arial, sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText(text, canvas.width / 2, canvas.height / 2);
+        }
+
+        // ==============================
+        // LOOP PRINCIPAL DO JOGO
+        // ==============================
+        function update(time = 0) {
+            if (gameOver) {
+                showMessage('GAME OVER');
+                return;
+            }
+            if (gameWon) {
+                showMessage('VOCÊ VENCEU!');
+                return;
+            }
+
+
+            // Apply screen shake offset
+            let offsetX = 0;
+            let offsetY = 0;
+            if (screenShakeTimer > 0) {
+                offsetX = Math.random() * screenShakeMagnitude * 2 - screenShakeMagnitude;
+                offsetY = Math.random() * screenShakeMagnitude * 2 - screenShakeMagnitude;
+                screenShakeTimer -= 1000 / 60; // Assuming 60 FPS
+                if (screenShakeTimer <= 0) {
+                    screenShakeMagnitude = 0;
+                }
+            }
+            ctx.save(); // Save the current canvas state
+            ctx.translate(offsetX, offsetY); // Apply the shake
+
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            drawBackground();
+
+            player.update();
+            handleBullets();
+
+            if (currentBoss === 1) {
+                mafiaDaRaiz.update(time);
+                drawBossHealthBar(mafiaDaRaiz);
+
+                for (let i = bullets.length - 1; i >= 0; i--) {
+                    if (checkCollision(bullets[i], mafiaDaRaiz.getHitbox())) {
+                        mafiaDaRaiz.hp--;
+                        mafiaDaRaiz.hitFlash = 5; // Trigger hit flash
+                        for (let j = 0; j < 10; j++) {
+                            createParticle(bullets[i].x, bullets[i].y, bullets[i].color, 3, (Math.random() - 0.5) * 5, (Math.random() - 0.5) * 5, 4);
+                        }
+                        bullets.splice(i, 1);
+                        if (mafiaDaRaiz.hp <= 0) {
+                            startScreenShake(20, 500); // Big shake on boss defeat
+                            // Explosion particles when boss is defeated
+                            for (let j = 0; j < 100; j++) {
+                                createParticle(mafiaDaRaiz.getHitbox().x + mafiaDaRaiz.getHitbox().width / 2, mafiaDaRaiz.getHitbox().y + mafiaDaRaiz.getHitbox().height / 2, '#fff', 8, (Math.random() - 0.5) * 15, (Math.random() - 0.5) * 15, 1);
+                            }
+                            currentBoss = 2;
+                            // Limpa projéteis da tela
+                            mafiaDaRaiz.projectiles = [];
+                            mafiaDaRaiz.homingProjectiles = [];
+                        }
+                    }
+                }
+            } else {
+                ilMelecone.update(time);
+                drawBossHealthBar(ilMelecone);
+
+                // Colisão do jogador com o chefe
+                // Il Melecone's 3rd phase only takes damage on attack, not touch
+                if (ilMelecone.phase !== 3 && (checkCollision(player, ilMelecone) || (ilMelecone.attackState === 'punching' && checkCollision(player, ilMelecone.punchHitbox)))) {
+                    player.takeDamage();
+                }
+
+                // Damage particles when Il Melecone is hit
+                for (let i = bullets.length - 1; i >= 0; i--) {
+                    if (checkCollision(bullets[i], ilMelecone)) {
+                        ilMelecone.hp--;
+                        ilMelecone.hitFlash = 5; // Trigger hit flash
+                        for (let j = 0; j < 10; j++) {
+                            createParticle(bullets[i].x, bullets[i].y, bullets[i].color, 3, (Math.random() - 0.5) * 5, (Math.random() - 0.5) * 5, 4);
+                        }
+                        bullets.splice(i, 1);
+                        if (ilMelecone.hp <= 0) {
+                            startScreenShake(20, 500); // Tremor forte ao derrotar o boss
+
+                            // Criar partículas da explosão (brancas)
+                            for (let j = 0; j < 100; j++) {
+                                createParticle(
+                                    ilMelecone.x + ilMelecone.width / 2,
+                                    ilMelecone.y + ilMelecone.height / 2,
+                                    '#ffffff',
+                                    8,
+                                    (Math.random() - 0.5) * 15,
+                                    (Math.random() - 0.5) * 15,
+                                    1
+                                );
+                            }
+
+                            // Criar partículas coloridas simulando pedaços do boss
+                            for (let j = 0; j < 30; j++) {
+                                createParticle(
+                                    ilMelecone.x + Math.random() * ilMelecone.width,
+                                    ilMelecone.y + Math.random() * ilMelecone.height,
+                                    ilMelecone.color || '#ff5555', // cor do boss ou cor padrão
+                                    6,
+                                    (Math.random() - 0.5) * 10,
+                                    (Math.random() - 0.5) * 10,
+                                    1
+                                );
+                            }
+
+                            // Desaparecer o boss visualmente
+                            ilMelecone.visible = false; // use isso se o desenho depende de "visible"
+                            ilMelecone.width = 0;
+                            ilMelecone.height = 0;
+
+                            // Após 1 segundo, marcar como vitória
+                            setTimeout(() => {
+                                gameWon = true;
+                            }, 1200);
+                        }
+                    }
+                }
+            }
+
+            // Player collision with platforms
+            if (currentBoss === 2) {
+                for (const platform of platforms) {
+                    if (player.velocityY > 0 && checkCollision(player, platform) && player.y + player.height <= platform.y + player.velocityY) {
+                        player.y = platform.y - player.height;
+                        player.velocityY = 0;
+                        player.isJumping = false;
+                    }
+                }
+            }
+
+
+            updateParticles();
+            drawParticles();
+
+            ctx.restore(); // Restore the canvas state to remove shake offset
+
+            requestAnimationFrame(update);
+        }
+
+        // Inicia o jogo
+        update();
+
+    </script>
+
+</body>
+</html>
